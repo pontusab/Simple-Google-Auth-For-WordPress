@@ -6,6 +6,7 @@ class Auth
 	private $client_secret;
 	private $redirect_uri;
 	private $code;
+	private $domain;
 	private static $instance;
 
 
@@ -34,6 +35,7 @@ class Auth
 		$this->client_secret = '-0KSo2KM5gQJoXDnKK2JZ0Rj';
 		$this->redirect_uri  = get_bloginfo('url');
 		$this->code   		 = isset( $_GET['code'] ) ? $_GET['code'] : null;
+		$this->domain 		 = 'wdlinkoping.se'; // change to regionvarmland.se
 
 		$this->handle();
 	} 
@@ -46,13 +48,14 @@ class Auth
      */
 
 	public function handle()
-	{
-		if( $this->code && wp_verify_nonce( $_GET['state'], 'state' ) )
+	{	
+		// Chek for the code callback, the nonce and not logged in
+		if( $this->code && wp_verify_nonce( $_GET['state'], 'state' ) && !is_user_logged_in() )
 		{
 			$response = wp_remote_request( 'https://accounts.google.com/o/oauth2/token', array(
 		        'method'    => 'POST',
 		        'timeout'   => 60,
-		        'sslverify' => false,
+		        'sslverify' => true,
 		        'body' =>  array(
 		           	'code' 	   		=> $this->code,
 		            'client_id' 	=> $this->client_id,
@@ -95,65 +98,69 @@ class Auth
 	}
 
 
-	/**
-     * This method handles the authentication callback.
-     *
-     *
-     * @param  Request  $request  The request object.
-     * @param  string   $provider The authentication provider.
-     * @return Response The response.
-     */
-
-	public function callback()
-	{	
-		$user = $this->UserInfo( $this->authenticate() );
-	}
-
-
-	public function loginUrl()
+	public function loginLogout( $loginText = false, $logoutText = false )
 	{
-	   return sprintf( 
-	        'https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=%s&scope=%s&redirect_uri=%s&state=%s',
-			$this->client_id,
-			urlencode( 'code' ),
-			'profile%20email%20openid',
-			urlencode( $this->redirect_uri ),
-			wp_create_nonce( 'state' )
-	    );
+		if( !is_user_logged_in() )
+		{
+			$url = sprintf( 
+		        'https://accounts.google.com/o/oauth2/auth?client_id=%s&response_type=%s&scope=%s&redirect_uri=%s&state=%s',
+				$this->client_id,
+				urlencode( 'code' ),
+				urlencode( 'profile email openid' ),
+				urlencode( $this->redirect_uri ),
+				wp_create_nonce( 'state' )
+		    );
+
+		    $link = '<a href="'. $url .'">'.( !empty( $loginText ) ? $loginText : __( 'Login with Google Account' ) ).'</a>';
+		}
+		else
+		{
+			$link = '<a href="'. wp_logout_url() .'">'.( !empty( $logoutText ) ? $logoutText : __( 'Logout' ) ).'</a>';
+		}
+
+		return $link;
 	}
 
 
 	public function findUser( $user )
     {
-        $userID = (int) current( get_users( array(
-            'meta_key' 	 => 'uid',
-            'meta_value' => $user->ID,
-            'fields' 	 => 'ID'
-        )));
+    	if( strstr( $user->email, $this->domain) !== FALSE )
+    	{
+	        $userID = (int) current( get_users( array(
+	            'meta_key' 	 => 'uid',
+	            'meta_value' => $user->ID,
+	            'fields' 	 => 'ID'
+	        )));
 
-        if( !$userID )
-        {
-        	$userData = array(
-				'ID' 			=> '',
-				'user_login'	=> $user->email,
-				'user_email'	=> $user->email,
-				'display_name'	=> $user->name,
-				'role'			=> 'author',
-			);
+	        if( !$userID )
+	        {
+	        	$userData = array(
+					'ID' 			=> '',
+					'user_login'	=> $user->email,
+					'user_email'	=> $user->email,
+					'display_name'	=> $user->name,
+					'role'			=> 'author',
+				);
 
-        	$userID = (int) wp_insert_user( $userData );
+	        	$userID = (int) wp_insert_user( $userData );
 
-        	if( $userID > 0 )
-        	{
-        		update_user_meta( $userID, 'uid', $user->ID );	
-        		update_user_meta( $userID, 'show_admin_bar_front', false );
-        	}
-        	else
-        	{
-        	}
-        }
+	        	if( $userID > 0 )
+	        	{
+	        		update_user_meta( $userID, 'uid', $user->ID );	
+	        		update_user_meta( $userID, 'show_admin_bar_front', false );
+	        	}
+	        	else
+	        	{
+	        		//throw new( 'Could not add uid to user.' );
+	        	}
+	        }
 
-        wp_set_auth_cookie( $userID, true );
+	        wp_set_auth_cookie( $userID, true );
+	    }
+	    else
+	    {
+	    	//throw new( 'Only ' . $this->domain . ' are allowed to login!' );
+	    }
     }
 }
 
