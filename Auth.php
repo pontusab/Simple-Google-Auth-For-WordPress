@@ -48,34 +48,43 @@ class Auth
      */
 
 	public function handle()
-	{	
-		// Chek for the code callback, the nonce and not logged in
-		if( $this->code && wp_verify_nonce( $_GET['state'], 'state' ) && !is_user_logged_in() )
+	{
+		try 
+	    {
+			// Chek for the code callback, the nonce and not logged in
+			if( $this->code && wp_verify_nonce( $_GET['state'], 'state' ) && !is_user_logged_in() )
+			{
+				$response = wp_remote_request( 'https://accounts.google.com/o/oauth2/token', array(
+			        'method'    => 'POST',
+			        'timeout'   => 60,
+			        'sslverify' => true,
+			        'body' =>  array(
+			           	'code' 	   		=> $this->code,
+			            'client_id' 	=> $this->client_id,
+			            'client_secret' => $this->client_secret,
+			            'redirect_uri' 	=> $this->redirect_uri,
+			            'grant_type'    => 'authorization_code'
+			        )
+			    ));
+
+			    $token = json_decode( $response['body'] )->access_token;
+
+			    if( !empty( $token ) )
+			    {
+			    	$user = $this->userInfo( $token );
+
+			    	$this->findUser( $user );
+			    }
+			    else
+			    {
+			    	throw new AuthException( 'Invalid token.' );
+			    }
+			}
+		}
+
+		catch( AuthException $e ) 
 		{
-			$response = wp_remote_request( 'https://accounts.google.com/o/oauth2/token', array(
-		        'method'    => 'POST',
-		        'timeout'   => 60,
-		        'sslverify' => true,
-		        'body' =>  array(
-		           	'code' 	   		=> $this->code,
-		            'client_id' 	=> $this->client_id,
-		            'client_secret' => $this->client_secret,
-		            'redirect_uri' 	=> $this->redirect_uri,
-		            'grant_type'    => 'authorization_code'
-		        )
-		    ));
-
-		    $token = json_decode( $response['body'] )->access_token;
-
-		    if( !empty( $token ) )
-		    {
-		    	$user = $this->userInfo( $token );
-
-		    	// See if user alredy are in the database
-		    	// Else add new
-
-		    	$this->findUser( $user );
-		    }
+		    echo 'Caught exception: ',  $e->getMessage();
 		}
 	}
 
@@ -124,44 +133,52 @@ class Auth
 
 	public function findUser( $user )
     {
-    	if( strstr( $user->email, $this->domain) !== FALSE )
-    	{
-	        $userID = (int) current( get_users( array(
-	            'meta_key' 	 => 'uid',
-	            'meta_value' => $user->ID,
-	            'fields' 	 => 'ID'
-	        )));
-
-	        if( !$userID )
-	        {
-	        	$userData = array(
-					'ID' 			=> '',
-					'user_login'	=> $user->email,
-					'user_email'	=> $user->email,
-					'display_name'	=> $user->name,
-					'role'			=> 'author',
-				);
-
-	        	$userID = (int) wp_insert_user( $userData );
-
-	        	if( $userID > 0 )
-	        	{
-	        		update_user_meta( $userID, 'uid', $user->ID );	
-	        		update_user_meta( $userID, 'show_admin_bar_front', false );
-	        	}
-	        	else
-	        	{
-	        		//throw new( 'Could not add uid to user.' );
-	        	}
-	        }
-
-	        wp_set_auth_cookie( $userID, true );
-	    }
-	    else
+    	try 
 	    {
-	    	//throw new( 'Only ' . $this->domain . ' are allowed to login!' );
-	    }
-    }
+	    	if( strstr( $user->email, $this->domain) !== FALSE )
+	    	{
+		        $userID = (int) current( get_users( array(
+		            'meta_key' 	 => 'uid',
+		            'meta_value' => $user->ID,
+		            'fields' 	 => 'ID'
+		        )));
+
+		        if( !$userID )
+		        {
+		        	$userData = array(
+						'ID' 			=> '',
+						'user_login'	=> $user->email,
+						'user_email'	=> $user->email,
+						'display_name'	=> $user->name,
+						'role'			=> 'author',
+					);
+
+		        	$userID = (int) wp_insert_user( $userData );
+
+		        	if( $userID > 0 )
+		        	{
+		        		update_user_meta( $userID, 'uid', $user->ID );	
+		        	}
+		        	else
+		        	{
+		        		throw new AuthException( 'Could not add uid to user.' );
+		        	}
+		        }
+
+		        wp_set_auth_cookie( $userID, true );
+		    }
+		    else
+		    {
+		    	throw new AuthException( 'Only ' . $this->domain . ' are allowed to login!' );
+		    }
+		}
+	  
+		catch( AuthException $e ) 
+		{
+		    echo 'Caught exception: ',  $e->getMessage();
+		}
+	}
 }
 
+// Holds the Exceptions
 class AuthException extends Exception { }
